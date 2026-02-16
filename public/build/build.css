@@ -1,0 +1,56 @@
+
+/* Full-width dropdown with proper styling */
+.pkpFormField--select .pkpFormField__input--select {
+    width: 100%;
+    background-color: #fff;
+    color: #000;
+}
+
+/* Spacing between revision and genre dropdowns */
+.oreUpload__genreSelect {
+    margin-top: 1.5rem;
+}
+.oreUpload {
+    margin-top: 1rem;
+}
+.oreUpload__wrapper {
+    position: relative;
+}
+.oreUpload__prompt {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 5rem;
+    padding: 1rem;
+    border: 2px dashed #ddd;
+    font-size: 0.875rem;
+}
+.oreUpload__prompt p {
+    margin: 0;
+    color: #666;
+}
+.oreUpload__files {
+    padding: 0.5rem 0;
+}
+.oreUpload__uploadedFile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    background-color: #f3f3f3;
+    border: 1px solid #ddd;
+    border-radius: 2px;
+}
+.oreUpload__fileName {
+    flex: 1;
+    font-size: 0.875rem;
+}
+.oreUpload__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+}

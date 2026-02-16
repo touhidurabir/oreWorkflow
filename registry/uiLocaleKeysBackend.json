@@ -1,0 +1,15 @@
+[
+  "common.cancel",
+  "common.remove",
+  "common.save",
+  "common.upload",
+  "common.upload.addFile",
+  "common.upload.dragFile",
+  "plugins.generic.oreWorkflow.notARevision",
+  "plugins.generic.oreWorkflow.revisionSuccess",
+  "plugins.generic.oreWorkflow.selectGenre.placeholder",
+  "plugins.generic.oreWorkflow.uploadProgress",
+  "plugins.generic.oreWorkflow.uploadSuccess",
+  "submission.upload.selectComponent",
+  "submission.upload.selectOptionalFileToRevise"
+]
