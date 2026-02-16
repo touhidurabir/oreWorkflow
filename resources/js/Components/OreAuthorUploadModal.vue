@@ -303,14 +303,12 @@ function handleSave() {
 </script>
 
 <style>
-/* Full-width dropdown with proper styling */
 .pkpFormField--select .pkpFormField__input--select {
     width: 100%;
     background-color: #fff;
     color: #000;
 }
 
-/* Spacing between revision and genre dropdowns */
 .oreUpload__genreSelect {
     margin-top: 1.5rem;
 }
