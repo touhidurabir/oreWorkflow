@@ -31,7 +31,6 @@ use PKP\security\authorization\ContextAccessPolicy;
 use PKP\security\authorization\SubmissionAccessPolicy;
 use PKP\security\authorization\UserRolesRequiredPolicy;
 use PKP\security\Role;
-use PKP\stageAssignment\StageAssignment;
 use PKP\submissionFile\SubmissionFile;
 
 class OreSubmissionFileController extends PKPBaseController
@@ -121,14 +120,6 @@ class OreSubmissionFileController extends PKPBaseController
         $user = $request->getUser();
         $submission = $this->getAuthorizedContextObject(Application::ASSOC_TYPE_SUBMISSION); 
 
-        // Verify user is assigned as author on this submission
-        // FIXME: Only author ??
-        // if (!$this->isUserAuthorOnSubmission($user->getId(), $submission->getId())) {
-        //     return response()->json([
-        //         'error' => __('plugins.generic.oreWorkflow.error.notAuthor'),
-        //     ], Response::HTTP_FORBIDDEN);
-        // }
-
         $context = app()->get('context')->get($submission->getData('contextId')); /** @var Context $context */
 
         if (empty($_FILES['file'])) {
@@ -213,9 +204,9 @@ class OreSubmissionFileController extends PKPBaseController
         $user = $request->getUser();
         $submission = $this->getAuthorizedContextObject(Application::ASSOC_TYPE_SUBMISSION); /** @var Submission $submission */
         $context = app()->get('context')->get($submission->getData('contextId')); /** @var Context $context */
-        $submissionFile = Repo::submissionFile()->get((int) $illuminateRequest->route('submissionFileId'));
+        $submissionFile = Repo::submissionFile()->get((int) $illuminateRequest->route('submissionFileId'), $submission->getId());
 
-        if (!$submissionFile || $submissionFile->getData('submissionId') !== $submission->getId()) {
+        if (!$submissionFile) {
             return response()->json([
                 'error' => __('api.404.resourceNotFound'),
             ], Response::HTTP_NOT_FOUND);
@@ -227,14 +218,6 @@ class OreSubmissionFileController extends PKPBaseController
                 'error' => __('plugins.generic.oreWorkflow.error.wrongStage'),
             ], Response::HTTP_FORBIDDEN);
         }
-
-        // Verify user is author on submission
-        // FIXME: Only author ??
-        // if (!$this->isUserAuthorOnSubmission($user->getId(), $submission->getId())) {
-        //     return response()->json([
-        //         'error' => __('plugins.generic.oreWorkflow.error.notAuthor'),
-        //     ], Response::HTTP_FORBIDDEN);
-        // }
 
         if (empty($_FILES['file'])) {
             return response()->json([
@@ -289,18 +272,8 @@ class OreSubmissionFileController extends PKPBaseController
      */
     public function getFiles(Request $illuminateRequest): JsonResponse
     {
-        $request = $this->getRequest();
-        $user = $request->getUser();
         $submission = $this->getAuthorizedContextObject(Application::ASSOC_TYPE_SUBMISSION);
         $context = app()->get('context')->get($submission->getData('contextId'));
-
-        // Verify user is assigned as author on this submission
-        // FIXME: Only author ??
-        // if (!$this->isUserAuthorOnSubmission($user->getId(), $submission->getId())) {
-        //     return response()->json([
-        //         'error' => __('plugins.generic.oreWorkflow.error.notAuthor'),
-        //     ], Response::HTTP_FORBIDDEN);
-        // }
 
         $files = Repo::submissionFile()
             ->getCollector()
@@ -347,17 +320,6 @@ class OreSubmissionFileController extends PKPBaseController
         }
 
         return response()->json($result, Response::HTTP_OK);
-    }
-
-    /**
-     * Check if user is assigned as author on submission
-     */
-    protected function isUserAuthorOnSubmission(int $userId, int $submissionId): bool
-    {
-        return StageAssignment::withSubmissionIds([$submissionId])
-            ->withUserId($userId)
-            ->withRoleIds([Role::ROLE_ID_AUTHOR])
-            ->exists();
     }
 
     /**

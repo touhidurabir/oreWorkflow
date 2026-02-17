@@ -45,12 +45,14 @@ class OreWorkflowPlugin extends GenericPlugin
         $request = Application::get()->getRequest(); 
         $router = $request->getRouter();
         
-        // For page load, will be only available for author dashbaord
-        // as check of PKP\pages\dashboard\DashboardPage::MySubmissions which is set to `mySubmissions`
-        // But unable to use it directly as it's not being properly namespace and not available
-        // immediately before the load of PKP\pages\dashboard\PKPDashboardHandler
+        // Restrict only for author dashboard
         if ($router
             && $router instanceof \PKP\core\PKPPageRouter
+            
+            // For page load, will be only available for author dashbaord
+            // as check of PKP\pages\dashboard\DashboardPage::MySubmissions which is set to `mySubmissions`
+            // But unable to use it directly as it's not being properly namespace and not available
+            // immediately before the load of PKP\pages\dashboard\PKPDashboardHandler
             && $router->getRequestedOp($request) !== 'mySubmissions'
         ) { 
             return $success;
