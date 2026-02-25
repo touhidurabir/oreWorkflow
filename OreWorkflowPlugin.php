@@ -16,12 +16,14 @@
 namespace APP\plugins\generic\oreWorkflow;
 
 use APP\core\Application;
-use APP\plugins\generic\oreWorkflow\api\v1\OreSubmissionFileController;
 use APP\template\TemplateManager;
-use PKP\core\APIRouter;
-use PKP\security\Role;
+use PKP\core\PKPPageRouter;
 use PKP\plugins\GenericPlugin;
 use PKP\plugins\Hook;
+use PKP\security\authorization\SubmissionFileAccessPolicy;
+use PKP\security\authorization\internal\SubmissionFileStageRequiredPolicy;
+use PKP\security\Role;
+use PKP\submissionFile\SubmissionFile;
 
 class OreWorkflowPlugin extends GenericPlugin
 {
@@ -42,26 +44,11 @@ class OreWorkflowPlugin extends GenericPlugin
             return $success;
         }
 
-        $request = Application::get()->getRequest(); 
-        $router = $request->getRouter();
-        
-        // Restrict only for author dashboard
-        if ($router
-            && $router instanceof \PKP\core\PKPPageRouter
-            
-            // For page load, will be only available for author dashbaord
-            // as check of PKP\pages\dashboard\DashboardPage::MySubmissions which is set to `mySubmissions`
-            // But unable to use it directly as it's not being properly namespace and not available
-            // immediately before the load of PKP\pages\dashboard\PKPDashboardHandler
-            && $router->getRequestedOp($request) !== 'mySubmissions'
-        ) { 
-            return $success;
-        }
-
+        $request = Application::get()->getRequest();
         $context = $mainContextId ? app()->get('context')->get($mainContextId) : $request->getContext();
         $user = $request->getUser();
-        
-        // if user do not have Admin, JM, Editor or Author role, do not have access to ore workflow
+
+        // If user does not have Admin, JM, Editor or Author role, skip frontend scripts
         if (!$user
             || !$user->hasRole([
                 Role::ROLE_ID_SITE_ADMIN,
@@ -73,45 +60,122 @@ class OreWorkflowPlugin extends GenericPlugin
             return $success;
         }
 
-        $this->registerPluginApiControllers();
-        $this->registerFrontendScripts();
+        // FIXME : Anyway to make this only available for author dashbaords ? Not Sure !!
+        // Register authorization hooks for all request types (API + page loads)
+        $this->registerAuthorizationHook(); // Stage-level — allows authors to upload NEW files to SUBMISSION_FILE_SUBMISSION
+        $this->registerFileAccessHook(); // File-level — allows authors to revise ANY file at SUBMISSION_FILE_SUBMISSION stage
+
+        $router = $request->getRouter();
+
+        if ($router instanceof PKPPageRouter) {
+            if ($router->getRequestedPage($request) !== 'dashboard') {
+                return $success;
+            }
+
+            if ($router->getRequestedOp($request) !== 'mySubmissions') {
+                return $success;
+            }
+
+            // we only need to register the front end script for dashboard to have 
+            // the upload option visible form author dashbaord
+            $this->registerFrontendScripts();
+        }
 
         return $success;
     }
 
     /**
-     * Register custom API controllers using APIHandler::endpoints::plugin hook
+     * Register hook listener for SubmissionFileStageAccessPolicy::effect
+     *
+     * Allows authors to upload to SUBMISSION_FILE_SUBMISSION stage
+     * regardless of submissionProgress. The hook fires after all standard
+     * authorization checks but before the final permit/deny decision,
+     * so it can only expand access (add file stages), never restrict it.
+     *
+     * This enables:
+     * - FileUploadWizard (legacy modal) to work for authors
+     * - REST API (PKPSubmissionFileController) to work for authors
      */
-    protected function registerPluginApiControllers(): void
+    protected function registerAuthorizationHook(): void
     {
-        Hook::add('APIHandler::endpoints::plugin', function (string $hookName, APIRouter $apiRouter): bool {
-            $apiRouter->registerPluginApiControllers([
-                new OreSubmissionFileController(),
-            ]);
+        Hook::add('SubmissionFileStageAccessPolicy::effect', function (string $hookName, array $args): bool {
+            [
+                $submission,
+                $userRoles,
+                $stageAssignments,
+                $fileStage,
+                $action,
+                &$assignedFileStages
+            ] = $args;
+
+            // Only modify SUBMISSION_FILE_SUBMISSION stage with MODIFY action
+            if ($fileStage !== SubmissionFile::SUBMISSION_FILE_SUBMISSION
+                || $action !== SubmissionFileAccessPolicy::SUBMISSION_FILE_ACCESS_MODIFY) {
+                return Hook::CONTINUE;
+            }
+
+            // Only if user has author role in submission stage
+            // FIXME : should it be only author role or anyone can that access author dashbaord 
+	        // 		   e.g. ADMIN, JM, EDITOR and AUTHOR ?
+            if (empty($stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])
+                || !in_array(Role::ROLE_ID_AUTHOR, $stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])) {
+                return Hook::CONTINUE;
+            }
+
+            // Allow authors to upload to submission files stage (bypasses submissionProgress check)
+            if (!in_array(SubmissionFile::SUBMISSION_FILE_SUBMISSION, $assignedFileStages)) {
+                $assignedFileStages[] = SubmissionFile::SUBMISSION_FILE_SUBMISSION;
+            }
 
             return Hook::CONTINUE;
         });
     }
 
     /**
-     * Register frontend JavaScript and CSS for store extension
+     * Register hook listener for SubmissionFileAccessPolicy::authorFileAccess
+     *
+     * Allows authors to revise ANY file at the SUBMISSION_FILE_SUBMISSION
+     * stage, regardless of who originally uploaded it. Without this, authors can
+     * only revise files they uploaded themselves (SubmissionFileUploaderAccessPolicy
+     * checks uploaderUserId == currentUser).
+     *
+     * The hook adds a SubmissionFileStageRequiredPolicy to the author's inner
+     * PERMIT_OVERRIDES PolicySet, providing an alternative authorization path:
+     * "allow MODIFY if the file is at submission stage."
+     */
+    protected function registerFileAccessHook(): void
+    {
+        Hook::add('SubmissionFileAccessPolicy::authorFileAccess', function (string $hookName, array $args): bool {
+            [
+                $request,
+                $mode,
+                $submissionFileId,
+                &$authorFileAccessOptionsPolicy
+            ] = $args;
+
+            // Only for MODIFY access
+            if (!($mode & SubmissionFileAccessPolicy::SUBMISSION_FILE_ACCESS_MODIFY)) {
+                return Hook::CONTINUE;
+            }
+
+            // Allow authors to modify any file at SUBMISSION_FILE_SUBMISSION stage
+            // (regardless of who originally uploaded it)
+            $authorFileAccessOptionsPolicy->addPolicy(
+                new SubmissionFileStageRequiredPolicy($request, $submissionFileId, SubmissionFile::SUBMISSION_FILE_SUBMISSION)
+            );
+
+            return Hook::CONTINUE;
+        });
+    }
+
+    /**
+     * Register frontend JavaScript for store extension
      */
     protected function registerFrontendScripts(): void
     {
         $request = Application::get()->getRequest();
         $templateMgr = TemplateManager::getManager($request);
 
-        // Add CSS stylesheet
-        $templateMgr->addStyleSheet(
-            'OreWorkflowStyles',
-            "{$request->getBaseUrl()}/{$this->getPluginPath()}/public/build/build.css",
-            [
-                'contexts' => ['backend'],
-                'priority' => TemplateManager::STYLE_SEQUENCE_LAST,
-            ]
-        );
-
-        // Add JavaScript
         $templateMgr->addJavaScript(
             'OreWorkflowAuthorUpload',
             "{$request->getBaseUrl()}/{$this->getPluginPath()}/public/build/build.iife.js",

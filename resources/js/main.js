@@ -7,16 +7,27 @@
  *
  * ORE Workflow Plugin - Author File Upload Extension
  *
- * Extends fileManager_SUBMISSION_FILES to allow authors to upload
- * files at any workflow stage, with genre (article component) selection.
+ * Extends fileManager_SUBMISSION_FILES getTopItems to add an upload button
+ * for authors on the author dashboard. The button calls the existing
+ * fileStore.fileUpload() method which opens the FileUploadWizard
+ * (genre selection + file upload + metadata editing).
+ *
+ * Backend authorization is handled by a hook in SubmissionFileStageAccessPolicy::effect()
+ * registered in OreWorkflowPlugin.php, which allows authors to upload to
+ * SUBMISSION_FILE_SUBMISSION stage regardless of submissionProgress.
+ *
+ * NOTE: We extend getTopItems (not getManagerConfig) because managerConfig
+ * is a computed property that evaluates early during store setup (forced by
+ * an {immediate: true} watcher). This happens BEFORE Pinia plugin extensions
+ * (storeExtend) run, so extendFn('getManagerConfig') would never take effect.
+ * getTopItems is lazy — evaluated only on template render, after extensions
+ * are registered.
  */
 
-import OreAuthorUploadModal from './Components/OreAuthorUploadModal.vue';
-
-pkp.registry.registerComponent('OreAuthorUploadModal', OreAuthorUploadModal);
-
 /**
- * Extend the fileManager store for author uploads
+ * Extend the fileManager store to add upload button for authors
+ *
+ * @param {Object} piniaContext - Pinia store context from pkp.registry.storeExtend
  */
 function runOreAuthorUpload(piniaContext) {
 	// Only for author dashboard
@@ -25,53 +36,47 @@ function runOreAuthorUpload(piniaContext) {
 		return;
 	}
 
-	const {useLocalize} = pkp.modules.useLocalize;
-	const {useModal} = pkp.modules.useModal;
 	const {useCurrentUser} = pkp.modules.useCurrentUser;
-
-	const {t} = useLocalize();
-	const {openSideModal} = useModal();
+	const {useLocalize} = pkp.modules.useLocalize;
 	const {hasCurrentUserAtLeastOneAssignedRoleInStage} = useCurrentUser();
+	const {t} = useLocalize();
 
 	const fileStore = piniaContext.store;
 	const {submission, submissionStageId} = fileStore.props;
 
-	// Check if user has author role on this submission at this stage
-	// FIXME: 	should it be only author role or anyone can that access author dashbaord 
+	// Check if user has eligible role on this submission at this stage
+	// FIXME: 	should it be only author role or anyone can that access author dashbaord
 	// 			e.g. ADMIN, JM, EDITOR and AUTHOR ?
 	if (
-		!hasCurrentUserAtLeastOneAssignedRoleInStage(submission, submissionStageId, [
-			pkp.const.ROLE_ID_SITE_ADMIN,
-			pkp.const.ROLE_ID_MANAGER,
-			pkp.const.ROLE_ID_SUB_EDITOR,
-			pkp.const.ROLE_ID_AUTHOR,
-		])
+		!hasCurrentUserAtLeastOneAssignedRoleInStage(
+			submission,
+			submissionStageId,
+			[
+				pkp.const.ROLE_ID_SITE_ADMIN,
+				pkp.const.ROLE_ID_MANAGER,
+				pkp.const.ROLE_ID_SUB_EDITOR,
+				pkp.const.ROLE_ID_AUTHOR,
+			],
+		)
 	) {
 		return;
 	}
 
-	// Add upload method to store - opens SideModal with genre selection + file upload
-	fileStore.oreAuthorUpload = function () {
-		openSideModal(OreAuthorUploadModal, {
-			submissionId: submission.id,
-			onSuccess: () => fileStore.fetchFiles(),
-		});
-	};
-
-	// Extend getTopItems to add upload button (only if standard upload not permitted)
+	// Extend getTopItems to add upload button (only if standard upload not already permitted)
+	// Uses 'fileUpload' action which calls the existing fileStore.fileUpload() method
+	// that opens the FileUploadWizard legacy modal
 	fileStore.extender.extendFn('getTopItems', (originalItems, args) => {
 		const permittedActions = args.managerConfig?.permittedActions || [];
 		if (permittedActions.includes('fileUpload')) {
-			return originalItems; // Standard upload available, don't add ours
+			return originalItems; // Standard upload already available
 		}
-
 		return [
 			...originalItems,
 			{
 				component: 'FileManagerActionButton',
 				props: {
 					label: t('common.upload'),
-					action: 'oreAuthorUpload',
+					action: 'fileUpload',
 				},
 			},
 		];
