@@ -16,10 +16,13 @@
 namespace APP\plugins\generic\oreWorkflow;
 
 use APP\core\Application;
+use APP\submission\Submission;
 use APP\template\TemplateManager;
 use PKP\core\PKPPageRouter;
+use PKP\core\PKPRequest;
 use PKP\plugins\GenericPlugin;
 use PKP\plugins\Hook;
+use PKP\security\authorization\PolicySet;
 use PKP\security\authorization\SubmissionFileAccessPolicy;
 use PKP\security\authorization\internal\SubmissionFileStageRequiredPolicy;
 use PKP\security\Role;
@@ -34,10 +37,8 @@ class OreWorkflowPlugin extends GenericPlugin
     {
         $success = parent::register($category, $path, $mainContextId);
 
-        $this->addLocaleData();
-
         if (!$success) {
-            return false;
+            return $success;
         }
 
         if (!$this->getEnabled($mainContextId)) {
@@ -98,15 +99,15 @@ class OreWorkflowPlugin extends GenericPlugin
      */
     protected function registerAuthorizationHook(): void
     {
-        Hook::add('SubmissionFileStageAccessPolicy::effect', function (string $hookName, array $args): bool {
-            [
-                $submission,
-                $userRoles,
-                $stageAssignments,
-                $fileStage,
-                $action,
-                &$assignedFileStages
-            ] = $args;
+        Hook::add('SubmissionFileStageAccessPolicy::effect', function (
+            string $hookName,
+            Submission $submission,
+            array $userRoles,
+            array $stageAssignments,
+            int $fileStage,
+            int $action,
+            array &$assignedFileStages
+        ): bool {
 
             // Only modify SUBMISSION_FILE_SUBMISSION stage with MODIFY action
             if ($fileStage !== SubmissionFile::SUBMISSION_FILE_SUBMISSION
@@ -145,13 +146,13 @@ class OreWorkflowPlugin extends GenericPlugin
      */
     protected function registerFileAccessHook(): void
     {
-        Hook::add('SubmissionFileAccessPolicy::authorFileAccess', function (string $hookName, array $args): bool {
-            [
-                $request,
-                $mode,
-                $submissionFileId,
-                &$authorFileAccessOptionsPolicy
-            ] = $args;
+        Hook::add('SubmissionFileAccessPolicy::authorFileAccess', function (
+            string $hookName,
+            PKPRequest $request,
+            int $mode,
+            int $submissionFileId,
+            PolicySet &$authorFileAccessOptionsPolicy
+        ): bool {
 
             // Only for MODIFY access
             if (!($mode & SubmissionFileAccessPolicy::SUBMISSION_FILE_ACCESS_MODIFY)) {
