@@ -318,6 +318,7 @@ class OreWorkflowPlugin extends GenericPlugin
         }
 
         $mailable
+            ->from($context->getData('contactEmail'), $context->getData('contactName'))
             ->recipients(array_values($recipients))
             ->subject($template->getLocalizedData('subject'))
             ->body($template->getLocalizedData('body'))
