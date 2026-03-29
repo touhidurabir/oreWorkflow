@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE emails SYSTEM "../../../lib/pkp/dtd/emailTemplates.dtd">
+<!--
+  * plugins/generic/oreWorkflow/emailTemplates.xml
+  *
+  * Copyright (c) 2026 Simon Fraser University
+  * Copyright (c) 2026 John Willinsky
+  * Distributed under the GNU GPL v3. For full terms see the file docs/COPYING.
+  *
+  * Email templates XML file.
+  -->
+<emails>
+    <email
+        key="ORE_AUTHOR_SUBMISSION_FILE_NOTIFY"
+        name="plugins.generic.oreWorkflow.authorSubmissionFileNotify.name"
+        subject="plugins.generic.oreWorkflow.emails.authorSubmissionFileNotify.subject"
+        body="plugins.generic.oreWorkflow.emails.authorSubmissionFileNotify.body"
+    />
+</emails>

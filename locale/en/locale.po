@@ -16,3 +16,12 @@ msgstr "ORE Workflow Plugin"
 
 msgid "plugins.generic.oreWorkflow.description"
 msgstr "Extends workflow capabilities including allowing authors to upload files at any workflow stage."
+
+msgid "plugins.generic.oreWorkflow.authorSubmissionFileNotify.name"
+msgstr "Author Submission File Upload Notification"
+
+msgid "plugins.generic.oreWorkflow.emailVariable.authorName"
+msgstr "The full name of the author who uploaded the file"
+
+msgid "plugins.generic.oreWorkflow.emailVariable.fileName"
+msgstr "The name of the uploaded file"
