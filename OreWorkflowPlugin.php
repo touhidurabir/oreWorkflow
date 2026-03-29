@@ -17,20 +17,18 @@ namespace APP\plugins\generic\oreWorkflow;
 
 use APP\core\Application;
 use APP\facades\Repo;
+use APP\plugins\generic\oreWorkflow\jobs\SendAuthorFileUploadNotification;
 use APP\plugins\generic\oreWorkflow\mailables\AuthorSubmissionFileNotify;
 use APP\submission\Submission;
 use APP\template\TemplateManager;
-use Illuminate\Support\Facades\Mail;
 use PKP\core\PKPPageRouter;
 use PKP\core\PKPRequest;
-use PKP\log\SubmissionEmailLogEventType;
 use PKP\plugins\GenericPlugin;
 use PKP\plugins\Hook;
 use PKP\security\authorization\internal\SubmissionFileStageRequiredPolicy;
 use PKP\security\authorization\PolicySet;
 use PKP\security\authorization\SubmissionFileAccessPolicy;
 use PKP\security\Role;
-use PKP\stageAssignment\StageAssignment;
 use PKP\submissionFile\SubmissionFile;
 
 class OreWorkflowPlugin extends GenericPlugin
@@ -83,11 +81,11 @@ class OreWorkflowPlugin extends GenericPlugin
         $router = $request->getRouter();
 
         if ($router instanceof PKPPageRouter) {
-            if ($router->getRequestedPage($request) !== 'dashboard') {
+            if ($router->getRequestedPage($request) != 'dashboard') {
                 return $success;
             }
 
-            if ($router->getRequestedOp($request) !== 'mySubmissions') {
+            if ($router->getRequestedOp($request) != 'mySubmissions') {
                 return $success;
             }
 
@@ -149,8 +147,8 @@ class OreWorkflowPlugin extends GenericPlugin
     ): bool {
 
         // Only modify SUBMISSION_FILE_SUBMISSION stage with MODIFY action
-        if ($fileStage !== SubmissionFile::SUBMISSION_FILE_SUBMISSION
-            || $action !== SubmissionFileAccessPolicy::SUBMISSION_FILE_ACCESS_MODIFY) {
+        if ($fileStage != SubmissionFile::SUBMISSION_FILE_SUBMISSION
+            || $action != SubmissionFileAccessPolicy::SUBMISSION_FILE_ACCESS_MODIFY) {
             return Hook::CONTINUE;
         }
 
@@ -213,17 +211,17 @@ class OreWorkflowPlugin extends GenericPlugin
     }
 
     /**
-     * Handle new file upload at submission stage
+     * Handle new file upload at submission stage — dispatch deferred notification job
      */
     public function onSubmissionFileAdd(string $hookName, array $args): bool
     {
         $submissionFile = $args[0]; /** @var SubmissionFile $submissionFile */
 
-        if ($submissionFile->getData('fileStage') !== SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
+        if ($submissionFile->getData('fileStage') != SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
             return Hook::CONTINUE;
         }
 
-        $this->notifyEditorsOfAuthorUpload($submissionFile);
+        $this->dispatchNotificationJob($submissionFile);
 
         return Hook::CONTINUE;
     }
@@ -237,103 +235,45 @@ class OreWorkflowPlugin extends GenericPlugin
         $submissionFile = $args[1]; /** @var SubmissionFile $submissionFile */
         $params = $args[2]; /** @var array $params */
 
-        if ($submissionFile->getData('fileStage') !== SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
+        if ($submissionFile->getData('fileStage') != SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
             return Hook::CONTINUE;
         }
 
         // Only notify when a new file is uploaded (revision), not metadata edits
-        if (empty($params['fileId']) || $params['fileId'] === $submissionFile->getData('fileId')) {
+        if (empty($params['fileId']) || $params['fileId'] == $submissionFile->getData('fileId')) {
             return Hook::CONTINUE;
         }
 
-        $this->notifyEditorsOfAuthorUpload($newSubmissionFile);
+        // Skip if fileId already exists in revision history — this is a revert (cancel), not a new upload.
+        // The hook fires BEFORE DAO::update() creates the revision record, so a genuine new upload's
+        // fileId won't be in the history yet, but a cancelled revision's reverted fileId will be.
+        $revisions = Repo::submissionFile()->getRevisions($submissionFile->getId());
+        $existingRevisionFileIds = $revisions->map(fn ($r) => $r->fileId)->all();
+        if (in_array($params['fileId'], $existingRevisionFileIds)) {
+            return Hook::CONTINUE;
+        }
+
+        $this->dispatchNotificationJob($newSubmissionFile);
 
         return Hook::CONTINUE;
     }
 
     /**
-     * Send email notification to editors when an author uploads a file at the submission stage
+     * Dispatch a deferred notification job.
+     *
+     * The 60-second delay ensures the user has time to complete or cancel the
+     * FileUploadWizard. The job checks if the file still exists before sending —
+     * if the wizard was cancelled, the file will have been deleted and no email is sent.
      */
-    protected function notifyEditorsOfAuthorUpload(SubmissionFile $submissionFile): bool
+    protected function dispatchNotificationJob(SubmissionFile $submissionFile): void
     {
-        $uploaderUserId = $submissionFile->getData('uploaderUserId');
-        $submissionId = $submissionFile->getData('submissionId');
+        $request = Application::get()->getRequest();
+        $context = $request->getContext();
 
-        // Verify uploader is assigned as author at the submission stage
-        $authorAssignments = StageAssignment::query()
-            ->withSubmissionIds([$submissionId])
-            ->withRoleIds([Role::ROLE_ID_AUTHOR])
-            ->withStageIds([WORKFLOW_STAGE_ID_SUBMISSION])
-            ->withUserId($uploaderUserId)
-            ->get();
-
-        if ($authorAssignments->isEmpty()) {
-            return false;
-        }
-
-        $submission = Repo::submission()->get($submissionId);
-        if (!$submission) {
-            return false;
-        }
-
-        $context = app()->get('context')->get($submission->getData('contextId'));
-        if (!$context) {
-            return false;
-        }
-
-        $uploader = Repo::user()->get($uploaderUserId);
-        if (!$uploader) {
-            return false;
-        }
-
-        // Get editors (managers + sub-editors) assigned to the submission stage
-        $editorAssignments = StageAssignment::query()
-            ->withSubmissionIds([$submissionId])
-            ->withRoleIds([Role::ROLE_ID_MANAGER, Role::ROLE_ID_SUB_EDITOR])
-            ->withStageIds([WORKFLOW_STAGE_ID_SUBMISSION])
-            ->get();
-
-        $recipients = [];
-        foreach ($editorAssignments as $assignment) {
-            $editor = Repo::user()->get($assignment->userId);
-            if ($editor && !isset($recipients[$editor->getId()])) {
-                $recipients[$editor->getId()] = $editor;
-            }
-        }
-
-        if (empty($recipients)) {
-            return false;
-        }
-
-        $fileName = $submissionFile->getLocalizedData('name');
-        if (!$fileName) {
-            $fileName = $submissionFile->getData('name', $context->getPrimaryLocale());
-        }
-
-        $mailable = new AuthorSubmissionFileNotify($context, $submission, $uploader, $fileName ?? '');
-        $template = Repo::emailTemplate()->getByKey($context->getId(), AuthorSubmissionFileNotify::getEmailTemplateKey());
-
-        if (!$template) {
-            return false;
-        }
-
-        $mailable
-            ->from($context->getData('contactEmail'), $context->getData('contactName'))
-            ->recipients(array_values($recipients))
-            ->subject($template->getLocalizedData('subject'))
-            ->body($template->getLocalizedData('body'))
-            ->replyTo($context->getData('contactEmail'), $context->getData('contactName'));
-
-        Mail::send($mailable);
-
-        // Log the email in submission email log
-        Repo::emailLogEntry()->logMailable(
-            SubmissionEmailLogEventType::AUTHOR_NOTIFY_REVISED_VERSION,
-            $mailable,
-            $submission,
-            $uploader
-        );
-
-        return true;
+        SendAuthorFileUploadNotification::dispatch(
+            $context->getId(),
+            $submissionFile->getId(),
+            $submissionFile->getData('fileId')
+        )->delay(now()->addSeconds(30));
     }
 }
