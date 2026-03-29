@@ -274,6 +274,6 @@ class OreWorkflowPlugin extends GenericPlugin
             $context->getId(),
             $submissionFile->getId(),
             $submissionFile->getData('fileId')
-        )->delay(now()->addSeconds(30));
+        )->delay(now()->addSeconds(60));
     }
 }
