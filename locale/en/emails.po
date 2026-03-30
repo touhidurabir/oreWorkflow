@@ -16,6 +16,7 @@ msgstr "Author File Upload: {$submissionTitle}"
 
 msgid "plugins.generic.oreWorkflow.emails.authorSubmissionFileNotify.body"
 msgstr ""
+"<p>Dear {$recipientName},</p>"
 "An author has uploaded a file to a submission in {$contextName}.<br />\n"
 "<br />\n"
 "Submission: {$submissionTitle}<br />\n"
