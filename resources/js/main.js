@@ -44,19 +44,12 @@ function runOreAuthorUpload(piniaContext) {
 	const fileStore = piniaContext.store;
 	const {submission, submissionStageId} = fileStore.props;
 
-	// Check if user has eligible role on this submission at this stage
-	// FIXME: 	should it be only author role or anyone can that access author dashbaord
-	// 			e.g. ADMIN, JM, EDITOR and AUTHOR ?
+	// Check if user has eligible Author role on this submission at this stage
 	if (
 		!hasCurrentUserAtLeastOneAssignedRoleInStage(
 			submission,
 			submissionStageId,
-			[
-				pkp.const.ROLE_ID_SITE_ADMIN,
-				pkp.const.ROLE_ID_MANAGER,
-				pkp.const.ROLE_ID_SUB_EDITOR,
-				pkp.const.ROLE_ID_AUTHOR,
-			],
+			[pkp.const.ROLE_ID_AUTHOR,],
 		)
 	) {
 		return;

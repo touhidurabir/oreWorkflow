@@ -10,8 +10,6 @@
  * @class SendAuthorFileUploadNotification
  *
  * @brief Deferred job to notify editors when an author uploads a file at the submission stage.
- *        Dispatched with a delay so that if the user cancels the upload wizard,
- *        the file will be deleted before this job runs, and no email is sent.
  */
 
 namespace APP\plugins\generic\oreWorkflow\jobs;
@@ -49,18 +47,6 @@ class SendAuthorFileUploadNotification extends BaseJob
 
         $uploaderUserId = $submissionFile->getData('uploaderUserId');
         $submissionId = $submissionFile->getData('submissionId');
-
-        // Verify uploader is assigned as author at the submission stage
-        $authorAssignments = StageAssignment::query()
-            ->withSubmissionIds([$submissionId])
-            ->withRoleIds([Role::ROLE_ID_AUTHOR])
-            ->withStageIds([WORKFLOW_STAGE_ID_SUBMISSION])
-            ->withUserId($uploaderUserId)
-            ->get();
-
-        if ($authorAssignments->isEmpty()) {
-            return;
-        }
 
         $submission = Repo::submission()->get($submissionId);
         if (!$submission) {

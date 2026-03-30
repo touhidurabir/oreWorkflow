@@ -29,6 +29,7 @@ use PKP\security\authorization\internal\SubmissionFileStageRequiredPolicy;
 use PKP\security\authorization\PolicySet;
 use PKP\security\authorization\SubmissionFileAccessPolicy;
 use PKP\security\Role;
+use PKP\stageAssignment\StageAssignment;
 use PKP\submissionFile\SubmissionFile;
 
 class OreWorkflowPlugin extends GenericPlugin
@@ -50,31 +51,22 @@ class OreWorkflowPlugin extends GenericPlugin
             return $success;
         }
 
+        // Register mailable for admin email template management UI (all roles need this)
+        Hook::add('Mailer::Mailables', $this->addMailable(...));
+
         $request = Application::get()->getRequest();
         $context = $mainContextId ? app()->get('context')->get($mainContextId) : $request->getContext();
         $user = $request->getUser();
 
-        // If user does not have Admin, JM, Editor or Author role, skip hooks registration
-        if (!$user
-            || !$user->hasRole([
-                Role::ROLE_ID_SITE_ADMIN,
-                Role::ROLE_ID_MANAGER,
-                Role::ROLE_ID_SUB_EDITOR,
-                Role::ROLE_ID_AUTHOR
-            ], $context->getId())
-        ) {
+        if (!$user || !$user->hasRole([Role::ROLE_ID_AUTHOR], $context->getId())) {
             return $success;
         }
-
-        // Register mailable for admin email template management UI
-        Hook::add('Mailer::Mailables', $this->addMailable(...));
 
         // Register file upload notification hooks
         Hook::add('SubmissionFile::add', $this->onSubmissionFileAdd(...));
         Hook::add('SubmissionFile::edit', $this->onSubmissionFileEdit(...));
 
-        // FIXME : Anyway to make this only available for author dashbaords ? Not Sure !!
-        // Register authorization hooks for all request types (API + page loads)
+        // Register authorization hooks for all request types
         Hook::add('SubmissionFileStageAccessPolicy::effect', $this->onStageAccessPolicy(...));
         Hook::add('SubmissionFileAccessPolicy::authorFileAccess', $this->onAuthorFileAccess(...));
 
@@ -153,10 +145,10 @@ class OreWorkflowPlugin extends GenericPlugin
         }
 
         // Only if user has author role in submission stage
-        // FIXME : should it be only author role or anyone can that access author dashbaord
-        //         e.g. ADMIN, JM, EDITOR and AUTHOR ?
-        if (empty($stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])
-            || !in_array(Role::ROLE_ID_AUTHOR, $stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])) {
+        if (
+            empty($stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])
+            || !in_array(Role::ROLE_ID_AUTHOR, $stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])
+        ) {
             return Hook::CONTINUE;
         }
 
@@ -221,6 +213,10 @@ class OreWorkflowPlugin extends GenericPlugin
             return Hook::CONTINUE;
         }
 
+        if (!$this->isAuthorUploader($submissionFile)) {
+            return Hook::CONTINUE;
+        }
+
         $this->dispatchNotificationJob($submissionFile);
 
         return Hook::CONTINUE;
@@ -235,7 +231,11 @@ class OreWorkflowPlugin extends GenericPlugin
         $submissionFile = $args[1]; /** @var SubmissionFile $submissionFile */
         $params = $args[2]; /** @var array $params */
 
-        if ($submissionFile->getData('fileStage') != SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
+        if ($newSubmissionFile->getData('fileStage') != SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
+            return Hook::CONTINUE;
+        }
+
+        if (!$this->isAuthorUploader($newSubmissionFile)) {
             return Hook::CONTINUE;
         }
 
@@ -256,6 +256,24 @@ class OreWorkflowPlugin extends GenericPlugin
         $this->dispatchNotificationJob($newSubmissionFile);
 
         return Hook::CONTINUE;
+    }
+
+    /**
+     * Check if the uploader is assigned as author at the submission stage.
+     */
+    protected function isAuthorUploader(SubmissionFile $submissionFile): bool
+    {
+        $uploaderUserId = $submissionFile->getData('uploaderUserId');
+        $submissionId = $submissionFile->getData('submissionId');
+
+        $hasAuthor = StageAssignment::query()
+            ->withSubmissionIds([$submissionId])
+            ->withRoleIds([Role::ROLE_ID_AUTHOR])
+            ->withStageIds([WORKFLOW_STAGE_ID_SUBMISSION])
+            ->withUserId($uploaderUserId)
+            ->exists();
+        
+        return (bool)$hasAuthor;
     }
 
     /**

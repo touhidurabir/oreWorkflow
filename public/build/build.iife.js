@@ -14,12 +14,7 @@
     if (!hasCurrentUserAtLeastOneAssignedRoleInStage(
       submission,
       submissionStageId,
-      [
-        pkp.const.ROLE_ID_SITE_ADMIN,
-        pkp.const.ROLE_ID_MANAGER,
-        pkp.const.ROLE_ID_SUB_EDITOR,
-        pkp.const.ROLE_ID_AUTHOR
-      ]
+      [pkp.const.ROLE_ID_AUTHOR]
     )) {
       return;
     }
