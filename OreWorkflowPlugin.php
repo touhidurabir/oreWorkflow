@@ -285,11 +285,8 @@ class OreWorkflowPlugin extends GenericPlugin
      */
     protected function dispatchNotificationJob(SubmissionFile $submissionFile): void
     {
-        $request = Application::get()->getRequest();
-        $context = $request->getContext();
-
         SendAuthorFileUploadNotification::dispatch(
-            $context->getId(),
+            Repo::submission()->get($submissionFile->getData('submissionId'))->getData('contextId'),
             $submissionFile->getId(),
             $submissionFile->getData('fileId')
         )->delay(now()->addSeconds(60));
