@@ -27,7 +27,8 @@ class SendAuthorFileUploadNotification extends BaseJob
     public function __construct(
         public int $contextId,
         public int $submissionFileId,
-        public int $expectedFileId
+        public int $expectedFileId,
+        public bool $isRevision
     ) {
         parent::__construct();
     }
@@ -87,7 +88,7 @@ class SendAuthorFileUploadNotification extends BaseJob
             $fileName = $submissionFile->getData('name', $context->getPrimaryLocale());
         }
 
-        $mailable = new AuthorSubmissionFileNotify($context, $submission, $uploader, $fileName ?? '');
+        $mailable = new AuthorSubmissionFileNotify($context, $submission, $uploader, $fileName ?? '', $this->isRevision);
         $template = Repo::emailTemplate()->getByKey($context->getId(), AuthorSubmissionFileNotify::getEmailTemplateKey());
 
         if (!$template) {

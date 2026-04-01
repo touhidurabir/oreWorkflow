@@ -37,13 +37,17 @@ class AuthorSubmissionFileNotify extends Mailable
 
     protected const AUTHOR_NAME = 'authorName';
     protected const FILE_NAME = 'fileName';
+    protected const UPLOAD_TYPE = 'uploadType';
 
-    public function __construct(Context $context, Submission $submission, User $uploader, string $fileName)
+    public function __construct(Context $context, Submission $submission, User $uploader, string $fileName, bool $isRevision = false)
     {
         parent::__construct([$context, $submission]);
         $this->addData([
             static::AUTHOR_NAME => $uploader->getFullName(),
             static::FILE_NAME => $fileName,
+            static::UPLOAD_TYPE => $isRevision
+                ? __('plugins.generic.oreWorkflow.emailVariable.uploadType.revision')
+                : __('plugins.generic.oreWorkflow.emailVariable.uploadType.new'),
         ]);
     }
 
@@ -54,6 +58,7 @@ class AuthorSubmissionFileNotify extends Mailable
             [
                 static::AUTHOR_NAME => __('plugins.generic.oreWorkflow.emailVariable.authorName'),
                 static::FILE_NAME => __('plugins.generic.oreWorkflow.emailVariable.fileName'),
+                static::UPLOAD_TYPE => __('plugins.generic.oreWorkflow.emailVariable.uploadType'),
             ]
         );
     }

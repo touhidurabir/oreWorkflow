@@ -217,7 +217,7 @@ class OreWorkflowPlugin extends GenericPlugin
             return Hook::CONTINUE;
         }
 
-        $this->dispatchNotificationJob($submissionFile);
+        $this->dispatchNotificationJob($submissionFile, false);
 
         return Hook::CONTINUE;
     }
@@ -253,7 +253,7 @@ class OreWorkflowPlugin extends GenericPlugin
             return Hook::CONTINUE;
         }
 
-        $this->dispatchNotificationJob($newSubmissionFile);
+        $this->dispatchNotificationJob($newSubmissionFile, true);
 
         return Hook::CONTINUE;
     }
@@ -283,12 +283,13 @@ class OreWorkflowPlugin extends GenericPlugin
      * FileUploadWizard. The job checks if the file still exists before sending —
      * if the wizard was cancelled, the file will have been deleted and no email is sent.
      */
-    protected function dispatchNotificationJob(SubmissionFile $submissionFile): void
+    protected function dispatchNotificationJob(SubmissionFile $submissionFile, bool $isRevision = false): void
     {
         SendAuthorFileUploadNotification::dispatch(
             Repo::submission()->get($submissionFile->getData('submissionId'))->getData('contextId'),
             $submissionFile->getId(),
-            $submissionFile->getData('fileId')
+            $submissionFile->getData('fileId'),
+            $isRevision
         )->delay(now()->addSeconds(60));
     }
 }
