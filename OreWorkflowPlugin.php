@@ -16,111 +16,85 @@
 namespace APP\plugins\generic\oreWorkflow;
 
 use APP\core\Application;
-use APP\plugins\generic\oreWorkflow\api\v1\OreSubmissionFileController;
+use APP\facades\Repo;
+use APP\plugins\generic\oreWorkflow\jobs\SendAuthorFileUploadNotification;
+use APP\plugins\generic\oreWorkflow\mailables\AuthorSubmissionFileNotify;
+use APP\submission\Submission;
 use APP\template\TemplateManager;
-use PKP\core\APIRouter;
-use PKP\security\Role;
+use PKP\core\PKPPageRouter;
+use PKP\core\PKPRequest;
 use PKP\plugins\GenericPlugin;
 use PKP\plugins\Hook;
+use PKP\security\authorization\internal\SubmissionFileStageRequiredPolicy;
+use PKP\security\authorization\PolicySet;
+use PKP\security\authorization\SubmissionFileAccessPolicy;
+use PKP\security\Role;
+use PKP\stageAssignment\StageAssignment;
+use PKP\submissionFile\SubmissionFile;
 
 class OreWorkflowPlugin extends GenericPlugin
 {
     /**
      * @copydoc Plugin::register()
+     *
+     * @param null|mixed $mainContextId
      */
     public function register($category, $path, $mainContextId = null)
     {
         $success = parent::register($category, $path, $mainContextId);
 
-        $this->addLocaleData();
-
         if (!$success) {
-            return false;
+            return $success;
         }
 
         if (!$this->getEnabled($mainContextId)) {
             return $success;
         }
 
-        $request = Application::get()->getRequest(); 
-        $router = $request->getRouter();
-        
-        // Restrict only for author dashboard
-        if ($router
-            && $router instanceof \PKP\core\PKPPageRouter
-            
-            // For page load, will be only available for author dashbaord
-            // as check of PKP\pages\dashboard\DashboardPage::MySubmissions which is set to `mySubmissions`
-            // But unable to use it directly as it's not being properly namespace and not available
-            // immediately before the load of PKP\pages\dashboard\PKPDashboardHandler
-            && $router->getRequestedOp($request) !== 'mySubmissions'
-        ) { 
-            return $success;
-        }
+        // Register mailable for admin email template management UI (all roles need this)
+        Hook::add('Mailer::Mailables', $this->addMailable(...));
 
+        $request = Application::get()->getRequest();
         $context = $mainContextId ? app()->get('context')->get($mainContextId) : $request->getContext();
         $user = $request->getUser();
-        
-        // if user do not have Admin, JM, Editor or Author role, do not have access to ore workflow
-        if (!$user
-            || !$user->hasRole([
-                Role::ROLE_ID_SITE_ADMIN,
-                Role::ROLE_ID_MANAGER,
-                Role::ROLE_ID_SUB_EDITOR,
-                Role::ROLE_ID_AUTHOR
-            ], $context->getId())
-        ) {
+
+        if (!$user || !$user->hasRole([Role::ROLE_ID_AUTHOR], $context->getId())) {
             return $success;
         }
 
-        $this->registerPluginApiControllers();
-        $this->registerFrontendScripts();
+        // Register file upload notification hooks
+        Hook::add('SubmissionFile::add', $this->onSubmissionFileAdd(...));
+        Hook::add('SubmissionFile::edit', $this->onSubmissionFileEdit(...));
+
+        // Register authorization hooks for all request types
+        Hook::add('SubmissionFileStageAccessPolicy::effect', $this->onStageAccessPolicy(...));
+        Hook::add('SubmissionFileAccessPolicy::authorFileAccess', $this->onAuthorFileAccess(...));
+
+        $router = $request->getRouter();
+
+        if ($router instanceof PKPPageRouter) {
+            if ($router->getRequestedPage($request) != 'dashboard') {
+                return $success;
+            }
+
+            if ($router->getRequestedOp($request) != 'mySubmissions') {
+                return $success;
+            }
+
+            // Register frontend script for author dashboard upload button
+            $templateMgr = TemplateManager::getManager($request);
+            $templateMgr->addJavaScript(
+                'OreWorkflowAuthorUpload',
+                "{$request->getBaseUrl()}/{$this->getPluginPath()}/public/build/build.iife.js",
+                [
+                    'inline' => false,
+                    'contexts' => ['backend'],
+                    'priority' => TemplateManager::STYLE_SEQUENCE_LAST,
+                ]
+            );
+        }
 
         return $success;
-    }
-
-    /**
-     * Register custom API controllers using APIHandler::endpoints::plugin hook
-     */
-    protected function registerPluginApiControllers(): void
-    {
-        Hook::add('APIHandler::endpoints::plugin', function (string $hookName, APIRouter $apiRouter): bool {
-            $apiRouter->registerPluginApiControllers([
-                new OreSubmissionFileController(),
-            ]);
-
-            return Hook::CONTINUE;
-        });
-    }
-
-    /**
-     * Register frontend JavaScript and CSS for store extension
-     */
-    protected function registerFrontendScripts(): void
-    {
-        $request = Application::get()->getRequest();
-        $templateMgr = TemplateManager::getManager($request);
-
-        // Add CSS stylesheet
-        $templateMgr->addStyleSheet(
-            'OreWorkflowStyles',
-            "{$request->getBaseUrl()}/{$this->getPluginPath()}/public/build/build.css",
-            [
-                'contexts' => ['backend'],
-                'priority' => TemplateManager::STYLE_SEQUENCE_LAST,
-            ]
-        );
-
-        // Add JavaScript
-        $templateMgr->addJavaScript(
-            'OreWorkflowAuthorUpload',
-            "{$request->getBaseUrl()}/{$this->getPluginPath()}/public/build/build.iife.js",
-            [
-                'inline' => false,
-                'contexts' => ['backend'],
-                'priority' => TemplateManager::STYLE_SEQUENCE_LAST,
-            ]
-        );
     }
 
     /**
@@ -137,5 +111,185 @@ class OreWorkflowPlugin extends GenericPlugin
     public function getDescription()
     {
         return __('plugins.generic.oreWorkflow.description');
+    }
+
+    /**
+     * @copydoc Plugin::getInstallEmailTemplatesFile()
+     */
+    public function getInstallEmailTemplatesFile()
+    {
+        return "{$this->getPluginPath()}/emailTemplates.xml";
+    }
+
+    /**
+     * Allow authors to upload to SUBMISSION_FILE_SUBMISSION stage regardless of submissionProgress.
+     *
+     * The hook fires after all standard authorization checks but before the final
+     * permit/deny decision, so it can only expand access (add file stages), never restrict it.
+     * This enables FileUploadWizard (legacy modal) and REST API to work for authors.
+     */
+    public function onStageAccessPolicy(
+        string $hookName,
+        Submission $submission,
+        array $userRoles,
+        array $stageAssignments,
+        int $fileStage,
+        int $action,
+        array &$assignedFileStages
+    ): bool {
+
+        // Only modify SUBMISSION_FILE_SUBMISSION stage with MODIFY action
+        if ($fileStage != SubmissionFile::SUBMISSION_FILE_SUBMISSION
+            || $action != SubmissionFileAccessPolicy::SUBMISSION_FILE_ACCESS_MODIFY) {
+            return Hook::CONTINUE;
+        }
+
+        // Only if user has author role in submission stage
+        if (
+            empty($stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])
+            || !in_array(Role::ROLE_ID_AUTHOR, $stageAssignments[WORKFLOW_STAGE_ID_SUBMISSION])
+        ) {
+            return Hook::CONTINUE;
+        }
+
+        // Allow authors to upload to submission files stage (bypasses submissionProgress check)
+        if (!in_array(SubmissionFile::SUBMISSION_FILE_SUBMISSION, $assignedFileStages)) {
+            $assignedFileStages[] = SubmissionFile::SUBMISSION_FILE_SUBMISSION;
+        }
+
+        return Hook::CONTINUE;
+    }
+
+    /**
+     * Allow authors to revise ANY file at SUBMISSION_FILE_SUBMISSION stage,
+     * regardless of who originally uploaded it.
+     *
+     * Without this, authors can only revise files they uploaded themselves
+     * (SubmissionFileUploaderAccessPolicy checks uploaderUserId == currentUser).
+     * Adds a SubmissionFileStageRequiredPolicy to the author's inner
+     * PERMIT_OVERRIDES PolicySet as an alternative authorization path.
+     */
+    public function onAuthorFileAccess(
+        string $hookName,
+        PKPRequest $request,
+        int $mode,
+        int $submissionFileId,
+        PolicySet &$authorFileAccessOptionsPolicy
+    ): bool {
+
+        // Only for MODIFY access
+        if (!($mode & SubmissionFileAccessPolicy::SUBMISSION_FILE_ACCESS_MODIFY)) {
+            return Hook::CONTINUE;
+        }
+
+        // Allow authors to modify any file at SUBMISSION_FILE_SUBMISSION stage
+        // (regardless of who originally uploaded it)
+        $authorFileAccessOptionsPolicy->addPolicy(
+            new SubmissionFileStageRequiredPolicy($request, $submissionFileId, SubmissionFile::SUBMISSION_FILE_SUBMISSION)
+        );
+
+        return Hook::CONTINUE;
+    }
+
+    /**
+     * Register the plugin's mailable with the mailable collection
+     */
+    public function addMailable(string $hookName, array $args): bool
+    {
+        $mailableCollections = $args[0]; /** @var \Illuminate\Support\Collection $mailableCollections */
+        $mailableCollections->push(AuthorSubmissionFileNotify::class);
+
+        return Hook::CONTINUE;
+    }
+
+    /**
+     * Handle new file upload at submission stage — dispatch deferred notification job
+     */
+    public function onSubmissionFileAdd(string $hookName, array $args): bool
+    {
+        $submissionFile = $args[0]; /** @var SubmissionFile $submissionFile */
+
+        if ($submissionFile->getData('fileStage') != SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
+            return Hook::CONTINUE;
+        }
+
+        if (!$this->isAuthorUploader($submissionFile)) {
+            return Hook::CONTINUE;
+        }
+
+        $this->dispatchNotificationJob($submissionFile, false);
+
+        return Hook::CONTINUE;
+    }
+
+    /**
+     * Handle file revision at submission stage (fileId changed = new file uploaded)
+     */
+    public function onSubmissionFileEdit(string $hookName, array $args): bool
+    {
+        $newSubmissionFile = $args[0]; /** @var SubmissionFile $newSubmissionFile */
+        $submissionFile = $args[1]; /** @var SubmissionFile $submissionFile */
+        $params = $args[2]; /** @var array $params */
+
+        if ($newSubmissionFile->getData('fileStage') != SubmissionFile::SUBMISSION_FILE_SUBMISSION) {
+            return Hook::CONTINUE;
+        }
+
+        if (!$this->isAuthorUploader($newSubmissionFile)) {
+            return Hook::CONTINUE;
+        }
+
+        // Only notify when a new file is uploaded (revision), not metadata edits
+        if (empty($params['fileId']) || $params['fileId'] == $submissionFile->getData('fileId')) {
+            return Hook::CONTINUE;
+        }
+
+        // Skip if fileId already exists in revision history — this is a revert (cancel), not a new upload.
+        // The hook fires BEFORE DAO::update() creates the revision record, so a genuine new upload's
+        // fileId won't be in the history yet, but a cancelled revision's reverted fileId will be.
+        $revisions = Repo::submissionFile()->getRevisions($submissionFile->getId());
+        $existingRevisionFileIds = $revisions->map(fn ($r) => $r->fileId)->all();
+        if (in_array($params['fileId'], $existingRevisionFileIds)) {
+            return Hook::CONTINUE;
+        }
+
+        $this->dispatchNotificationJob($newSubmissionFile, true);
+
+        return Hook::CONTINUE;
+    }
+
+    /**
+     * Check if the uploader is assigned as author at the submission stage.
+     */
+    protected function isAuthorUploader(SubmissionFile $submissionFile): bool
+    {
+        $uploaderUserId = $submissionFile->getData('uploaderUserId');
+        $submissionId = $submissionFile->getData('submissionId');
+
+        $hasAuthor = StageAssignment::query()
+            ->withSubmissionIds([$submissionId])
+            ->withRoleIds([Role::ROLE_ID_AUTHOR])
+            ->withStageIds([WORKFLOW_STAGE_ID_SUBMISSION])
+            ->withUserId($uploaderUserId)
+            ->exists();
+        
+        return (bool)$hasAuthor;
+    }
+
+    /**
+     * Dispatch a deferred notification job.
+     *
+     * The 60-second delay ensures the user has time to complete or cancel the
+     * FileUploadWizard. The job checks if the file still exists before sending —
+     * if the wizard was cancelled, the file will have been deleted and no email is sent.
+     */
+    protected function dispatchNotificationJob(SubmissionFile $submissionFile, bool $isRevision = false): void
+    {
+        SendAuthorFileUploadNotification::dispatch(
+            Repo::submission()->get($submissionFile->getData('submissionId'))->getData('contextId'),
+            $submissionFile->getId(),
+            $submissionFile->getData('fileId'),
+            $isRevision
+        )->delay(now()->addSeconds(60));
     }
 }

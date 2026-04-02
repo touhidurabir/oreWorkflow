@@ -17,48 +17,11 @@ msgstr "ORE Workflow Plugin"
 msgid "plugins.generic.oreWorkflow.description"
 msgstr "Extends workflow capabilities including allowing authors to upload files at any workflow stage."
 
-msgid "plugins.generic.oreWorkflow.uploadConfirm"
-msgstr "Upload \"{$filename}\" to submission files?"
+msgid "plugins.generic.oreWorkflow.authorSubmissionFileNotify.name"
+msgstr "Author Submission File Upload Notification"
 
-msgid "plugins.generic.oreWorkflow.uploadSuccess"
-msgstr "File uploaded successfully."
+msgid "plugins.generic.oreWorkflow.emailVariable.authorName"
+msgstr "The full name of the author who uploaded the file"
 
-msgid "plugins.generic.oreWorkflow.uploadError"
-msgstr "Failed to upload file. Please try again."
-
-msgid "plugins.generic.oreWorkflow.notARevision"
-msgstr "This is not a revision of an existing file"
-
-msgid "plugins.generic.oreWorkflow.revisionConfirm"
-msgstr "Replace \"{$originalFile}\" with \"{$newFile}\"?"
-
-msgid "plugins.generic.oreWorkflow.revisionSuccess"
-msgstr "Revision uploaded successfully."
-
-# Genre selection modal
-msgid "plugins.generic.oreWorkflow.selectGenre.description"
-msgstr "Choose the type of file you are uploading."
-
-msgid "plugins.generic.oreWorkflow.selectGenre.placeholder"
-msgstr "Select article component"
-
-msgid "plugins.generic.oreWorkflow.continue"
-msgstr "Continue"
-
-msgid "plugins.generic.oreWorkflow.uploadFile.description"
-msgstr "Select an article component type and choose a file to upload."
-
-msgid "plugins.generic.oreWorkflow.selectFile"
-msgstr "File"
-
-msgid "plugins.generic.oreWorkflow.uploadProgress"
-msgstr "Uploading {$percent}% complete"
-
-msgid "common.uploading"
-msgstr "Uploading"
-
-msgid "plugins.generic.oreWorkflow.error.notAuthor"
-msgstr "You must be assigned as an author on this submission to upload files."
-
-msgid "plugins.generic.oreWorkflow.error.wrongStage"
-msgstr "You can only upload revisions of submission files."
+msgid "plugins.generic.oreWorkflow.emailVariable.fileName"
+msgstr "The name of the uploaded file"
